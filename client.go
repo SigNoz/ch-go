@@ -51,9 +51,8 @@ type Client struct {
 
 	// compressor performs block compression,
 	// see encodeBlock.
-	compressor        *compress.Writer
-	compression       proto.Compression
-	compressionMethod compress.Method
+	compressor  *compress.Writer
+	compression proto.Compression
 
 	settings []Setting
 }
@@ -274,6 +273,7 @@ func (c *Client) packet(ctx context.Context) (proto.ServerCode, error) {
 }
 
 func (c *Client) flushBuf(ctx context.Context, b *proto.Buffer) error {
+	defer b.Reset()
 	if err := ctx.Err(); err != nil {
 		return errors.Wrap(err, "context")
 	}
@@ -298,7 +298,6 @@ func (c *Client) flushBuf(ctx context.Context, b *proto.Buffer) error {
 	if ce := c.lg.Check(zap.DebugLevel, "Buffer flush"); ce != nil {
 		ce.Write(zap.Int("bytes", n))
 	}
-	b.Reset()
 	return nil
 }
 
@@ -491,7 +490,6 @@ func Connect(ctx context.Context, conn net.Conn, opt Options) (*Client, error) {
 	}
 
 	var (
-		compressor        = compress.NewWriterWithLevel(compress.Level(opt.CompressionLevel))
 		compression       proto.Compression
 		compressionMethod compress.Method
 	)
@@ -525,9 +523,8 @@ func Connect(ctx context.Context, conn net.Conn, opt Options) (*Client, error) {
 
 		readTimeout: opt.ReadTimeout,
 
-		compression:       compression,
-		compressionMethod: compressionMethod,
-		compressor:        compressor,
+		compression: compression,
+		compressor:  compress.NewWriter(compress.Level(opt.CompressionLevel), compressionMethod),
 
 		version:         ver,
 		protocolVersion: opt.ProtocolVersion,

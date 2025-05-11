@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-faster/city"
@@ -13,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/atomic"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -315,7 +315,7 @@ func (c *Client) encodeBlock(ctx context.Context, tableName string, input []prot
 			// See "Compressible" method of server or client code for reference.
 			if c.compression == proto.CompressionEnabled {
 				data := buf.Buf[start:]
-				if err := c.compressor.Compress(c.compressionMethod, data); err != nil {
+				if err := c.compressor.Compress(data); err != nil {
 					rerr = errors.Wrap(err, "compress")
 					return
 				}
