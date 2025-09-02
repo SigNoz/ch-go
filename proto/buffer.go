@@ -81,6 +81,12 @@ func (b *Buffer) PutInt(x int) {
 	b.PutUVarInt(uint64(x))
 }
 
+func (b *Buffer) PutVarInt(x int64) {
+	buf := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutVarint(buf, x)
+	b.Buf = append(b.Buf, buf[:n]...)
+}
+
 // PutByte encodes byte as uint8.
 func (b *Buffer) PutByte(x byte) {
 	b.PutUInt8(x)
