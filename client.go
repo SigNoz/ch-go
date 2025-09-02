@@ -17,6 +17,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.7.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	cryptossh "golang.org/x/crypto/ssh"
 
 	"github.com/ClickHouse/ch-go/compress"
 	pkgVersion "github.com/ClickHouse/ch-go/internal/version"
@@ -55,6 +56,9 @@ type Client struct {
 	compression proto.Compression
 
 	settings []Setting
+
+	// SSH authentication
+	sshSigner cryptossh.Signer
 }
 
 // Setting to send to server.
@@ -386,6 +390,9 @@ type Options struct {
 	TracerProvider               trace.TracerProvider
 	MeterProvider                metric.MeterProvider
 
+	// SSH authentication.
+	SSHSigner cryptossh.Signer
+
 	meter  metric.Meter
 	tracer trace.Tracer
 }
@@ -460,6 +467,12 @@ type clientVersion struct {
 // Connect performs handshake with ClickHouse server and initializes
 // application level connection.
 func Connect(ctx context.Context, conn net.Conn, opt Options) (*Client, error) {
+	return ConnectWithBuffer(ctx, conn, opt, new(proto.Buffer))
+}
+
+// ConnectWithBuffer performs handshake with ClickHouse server and initializes
+// application level connection using the provided buffer.
+func ConnectWithBuffer(ctx context.Context, conn net.Conn, opt Options, buf *proto.Buffer) (*Client, error) {
 	opt.setDefaults()
 
 	clientName := proto.Name
@@ -510,9 +523,14 @@ func Connect(ctx context.Context, conn net.Conn, opt Options) (*Client, error) {
 		compression = proto.CompressionDisabled
 	}
 
+	user := opt.User
+	if opt.SSHSigner != nil {
+		user = " SSH KEY AUTHENTICATION " + user
+	}
+
 	c := &Client{
 		conn:     conn,
-		writer:   proto.NewWriter(conn, new(proto.Buffer)),
+		writer:   proto.NewWriter(conn, buf),
 		reader:   proto.NewReader(conn),
 		settings: opt.Settings,
 		lg:       opt.Logger,
@@ -529,16 +547,15 @@ func Connect(ctx context.Context, conn net.Conn, opt Options) (*Client, error) {
 		version:         ver,
 		protocolVersion: opt.ProtocolVersion,
 		info: proto.ClientHello{
-			Name:  clientName,
-			Major: ver.Major,
-			Minor: ver.Minor,
-
+			Name:            clientName,
+			Major:           ver.Major,
+			Minor:           ver.Minor,
 			ProtocolVersion: opt.ProtocolVersion,
-
-			Database: opt.Database,
-			User:     opt.User,
-			Password: opt.Password,
+			Database:        opt.Database,
+			User:            user,
+			Password:        opt.Password,
 		},
+		sshSigner: opt.SSHSigner,
 	}
 
 	handshakeCtx, cancel := context.WithTimeout(ctx, opt.HandshakeTimeout)
@@ -558,6 +575,12 @@ type Dialer interface {
 // Dial dials requested address and establishes TCP connection to ClickHouse
 // server, performing handshake.
 func Dial(ctx context.Context, opt Options) (c *Client, err error) {
+	return DialWithBuffer(ctx, opt, new(proto.Buffer))
+}
+
+// DialWithBuffer dials requested address and establishes TCP connection to ClickHouse
+// server, performing handshake using the provided buffer.
+func DialWithBuffer(ctx context.Context, opt Options, buf *proto.Buffer) (c *Client, err error) {
 	opt.setDefaults()
 
 	if opt.OpenTelemetryInstrumentation {
@@ -595,7 +618,7 @@ func Dial(ctx context.Context, opt Options) (c *Client, err error) {
 		return nil, errors.Wrap(err, "dial")
 	}
 
-	client, err := Connect(ctx, conn, opt)
+	client, err := ConnectWithBuffer(ctx, conn, opt, buf)
 	if err != nil {
 		return nil, errors.Wrap(err, "connect")
 	}
